@@ -17,10 +17,42 @@ The system uses **Google Gemini** for intent understanding and tool selection, c
 
 ## Architecture
 
+### System Architecture
+
+```mermaid
+graph LR
+    User([User / Operations Agent]) -->|Natural Language Query| Frontend[Frontend<br/>Next.js, React]
+    Frontend -->|REST API| Backend[Backend<br/>Spring Boot]
+    Backend <-->|Prompt / Tool Calling| Gemini[Google Gemini AI]
+    Backend -->|Read-Only Queries| DB[(PostgreSQL)]
+```
+
 - **Frontend**: Next.js, React, Tailwind CSS (Chat-style interface)
 - **Backend**: Java 21, Spring Boot 3.x, Spring Data JPA
 - **Database**: PostgreSQL
 - **AI Integration**: Google Gemini via explicit Tool/Function calling
+
+### Data Flow Diagram
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant F as Frontend
+    participant B as Backend (Spring Boot)
+    participant G as Google Gemini
+    participant DB as PostgreSQL Database
+
+    U->>F: Ask question (e.g., "Status of order #123?")
+    F->>B: Send Chat Request
+    B->>G: Forward Prompt & Available Tools
+    G-->>B: Request Tool Call (e.g., get_order)
+    B->>DB: Execute Read-Only Query
+    DB-->>B: Return Data
+    B->>G: Provide Tool Response
+    G-->>B: Generate Final Answer
+    B-->>F: Return Answer
+    F-->>U: Display Answer
+```
 
 ## Prerequisites
 - Java 21
