@@ -1,0 +1,12 @@
+package com.opscopilot.entity;
+
+public enum EventType {
+    ORDER_CREATED,
+    PAYMENT_SUCCESS,
+    PAYMENT_FAILED,
+    ORDER_CONFIRMED,
+    DELIVERY_ASSIGNED,
+    DELIVERY_ASSIGNMENT_FAILED,
+    OUT_FOR_DELIVERY,
+    DELIVERED
+}

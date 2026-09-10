@@ -1,0 +1,2879 @@
+============================================================
+OPS COPILOT — COMPLETE PROJECT IMPLEMENTATION PLAN
+============================================================
+
+PROJECT NAME:
+OpsCopilot — AI Operations Assistant
+
+============================================================
+1. PROJECT OBJECTIVE
+============================================================
+
+Build a production-quality AI-powered Operations Copilot backend.
+
+The system allows an operations employee to ask questions about
+orders, payments, deliveries, customers, and order history using
+natural language.
+
+The system must use Google Gemini as the LLM.
+
+The core architectural principle is:
+
+    LLM = reasoning + intent understanding + tool selection
+    Backend = business logic
+    Database = source of truth
+    Tools = controlled interface between LLM and backend
+
+The LLM must NEVER directly access PostgreSQL.
+
+The LLM must NEVER generate arbitrary SQL.
+
+The LLM must only access operational information through explicitly
+defined backend tools.
+
+Example:
+
+User:
+"Customer says they've paid for order #1289 but delivery isn't
+scheduled. What's going on?"
+
+System:
+
+    User Query
+        |
+        v
+    Gemini LLM
+        |
+        | decides required tools
+        v
+    get_order(1289)
+    get_payment(1289)
+    get_delivery(1289)
+    get_order_timeline(1289)
+        |
+        v
+    Backend Services
+        |
+        v
+    PostgreSQL
+        |
+        v
+    Factual Tool Results
+        |
+        v
+    Gemini LLM
+        |
+        v
+    Human-readable operational explanation
+
+The final answer must be based on actual backend/database data.
+
+============================================================
+2. PRIMARY GOALS
+============================================================
+
+The project must demonstrate:
+
+1. Strong Java backend engineering.
+2. Spring Boot architecture.
+3. REST API design.
+4. PostgreSQL database design.
+5. AI integration using Gemini.
+6. LLM tool/function calling.
+7. Multi-tool orchestration.
+8. Controlled AI access to backend functionality.
+9. Proper validation and error handling.
+10. Observability and request tracing.
+11. Unit and integration testing.
+12. Dockerized local setup.
+13. Clean documentation.
+14. Production-oriented design decisions.
+15. Easy reviewer setup and execution.
+
+The project should feel like a real backend system with AI
+capabilities, not a simple ChatGPT wrapper.
+
+============================================================
+3. TECHNOLOGY STACK
+============================================================
+
+Backend:
+
+- Java 21
+- Spring Boot 3.x
+- Spring Web
+- Spring Data JPA
+- Hibernate
+- Bean Validation
+- Maven
+
+Database:
+
+- PostgreSQL
+
+AI:
+
+- Google Gemini API
+- Gemini model must be configurable through environment variables
+- Gemini integration must be isolated behind an abstraction/interface
+
+Documentation:
+
+- OpenAPI
+- Swagger UI
+
+Testing:
+
+- JUnit 5
+- Mockito
+- Spring Boot Test
+- Testcontainers where practical
+
+Infrastructure:
+
+- Docker
+- Docker Compose
+
+Optional:
+
+- Redis only if caching is implemented
+- Do not introduce Redis unless there is an actual requirement for it
+
+============================================================
+4. GEMINI API CONFIGURATION
+============================================================
+
+The application will use Google Gemini API.
+
+Required environment variables:
+
+GEMINI_API_KEY=<actual-api-key>
+GEMINI_MODEL=<configured-gemini-model>
+
+The exact model name must be configurable and must NOT be hardcoded
+throughout the application.
+
+The API key must NEVER be:
+
+- committed to Git
+- placed directly in Java source code
+- placed in README.md
+- placed in Dockerfile
+- placed in docker-compose.yml as a literal secret
+- printed in logs
+- returned through an API response
+
+Provide:
+
+.env.example
+
+Example:
+
+GEMINI_API_KEY=your-gemini-api-key
+GEMINI_MODEL=<model-name>
+
+The real .env file must be ignored by Git.
+
+The application should fail fast with a clear configuration error
+if GEMINI_API_KEY is missing when AI functionality is required.
+
+The Gemini integration should be isolated behind:
+
+LLMClient
+
+or an equivalent abstraction.
+
+Example conceptual interface:
+
+LLMClient
+    |
+    +-- GeminiLLMClient
+
+This allows the application to replace Gemini with another provider
+later without changing CopilotService or business services.
+
+============================================================
+5. HIGH-LEVEL ARCHITECTURE
+============================================================
+
+Architecture:
+
+                    +----------------------+
+                    |       Client         |
+                    | Postman / Browser    |
+                    +----------+-----------+
+                               |
+                               v
+                    +----------------------+
+                    |   REST Controller    |
+                    +----------+-----------+
+                               |
+                               v
+                    +----------------------+
+                    |   Copilot Service    |
+                    +----------+-----------+
+                               |
+                               v
+                    +----------------------+
+                    |      LLM Client      |
+                    |    Gemini Adapter    |
+                    +----------+-----------+
+                               |
+                         Tool Calling
+                               |
+              +----------------+----------------+
+              |                |                |
+              v                v                v
+        +-----------+    +-----------+    +-----------+
+        | OrderTool |    |PaymentTool|    |DeliveryTool|
+        +-----+-----+    +-----+-----+    +-----+-----+
+              |                |                |
+              v                v                v
+        +----------------------------------------------+
+        |             Backend Services                 |
+        +----------------------+-----------------------+
+                               |
+                               v
+                       +---------------+
+                       |  PostgreSQL   |
+                       +---------------+
+
+Customer and timeline tools use the same controlled backend
+architecture.
+
+============================================================
+6. REQUEST FLOW
+============================================================
+
+Every AI request follows this conceptual flow:
+
+1. Client sends natural-language query.
+2. CopilotController validates request.
+3. CopilotService creates requestId.
+4. CopilotService sends the user query to Gemini.
+5. Gemini receives:
+   - system instructions
+   - user query
+   - available tool definitions
+6. Gemini determines whether tools are required.
+7. Gemini requests one or more approved tools.
+8. Backend validates tool arguments.
+9. Tool invokes appropriate backend service.
+10. Backend service accesses PostgreSQL through repositories.
+11. Tool returns structured factual data.
+12. Tool results are sent back to Gemini.
+13. Gemini may request additional tools if required.
+14. Tool calling continues until enough information is available.
+15. Gemini generates final human-readable response.
+16. Backend returns structured API response.
+17. Request and tool execution information is logged.
+
+The maximum number of tool-calling iterations must be bounded to
+prevent infinite agent loops.
+
+Example:
+
+MAX_TOOL_CALL_ITERATIONS=5
+
+This must be configurable.
+
+============================================================
+7. CORE FUNCTIONAL FEATURES
+============================================================
+
+The application must support the following capabilities.
+
+------------------------------------------------------------
+7.1 Natural Language Operations Query
+------------------------------------------------------------
+
+Endpoint:
+
+POST /api/v1/copilot/query
+
+Request:
+
+{
+  "query": "What's the payment status for order #4521?"
+}
+
+The query must be passed to Gemini.
+
+Gemini must determine the required operation and use the appropriate
+tool.
+
+------------------------------------------------------------
+7.2 Order Status
+------------------------------------------------------------
+
+Example:
+
+"What is the status of order #4521?"
+
+Tool:
+
+get_order
+
+Input:
+
+{
+  "orderId": 4521
+}
+
+Returns structured order information.
+
+------------------------------------------------------------
+7.3 Payment Status
+------------------------------------------------------------
+
+Example:
+
+"Has order #4521 been paid?"
+
+Tool:
+
+get_payment
+
+Input:
+
+{
+  "orderId": 4521
+}
+
+Possible payment statuses:
+
+- PENDING
+- SUCCESS
+- FAILED
+- REFUNDED
+
+------------------------------------------------------------
+7.4 Delivery Status
+------------------------------------------------------------
+
+Example:
+
+"When will order #4521 be delivered?"
+
+Tool:
+
+get_delivery
+
+Input:
+
+{
+  "orderId": 4521
+}
+
+Possible delivery statuses:
+
+- NOT_ASSIGNED
+- ASSIGNED
+- OUT_FOR_DELIVERY
+- DELIVERED
+- FAILED
+
+------------------------------------------------------------
+7.5 Customer Information
+------------------------------------------------------------
+
+Example:
+
+"Who is the customer for order #4521?"
+
+Tool:
+
+get_customer
+
+Input:
+
+{
+  "customerId": 101
+}
+
+The tool should only expose fields that are necessary for the
+operation.
+
+Do not expose unnecessary sensitive customer information.
+
+------------------------------------------------------------
+7.6 Order Timeline
+------------------------------------------------------------
+
+Example:
+
+"What happened with order #4521?"
+
+Tool:
+
+get_order_timeline
+
+Input:
+
+{
+  "orderId": 4521
+}
+
+Returns chronological events.
+
+Example:
+
+ORDER_CREATED
+PAYMENT_SUCCESS
+ORDER_CONFIRMED
+PACKED
+DELIVERY_ASSIGNED
+OUT_FOR_DELIVERY
+DELIVERED
+
+Each event should include:
+
+- event type
+- description
+- timestamp
+- optional metadata
+
+------------------------------------------------------------
+7.7 Multi-Step Investigation
+------------------------------------------------------------
+
+This is a primary feature.
+
+Example:
+
+"Customer says they've paid for order #1289 but delivery isn't
+scheduled. What's going on?"
+
+Gemini should be able to call:
+
+get_order
+get_payment
+get_delivery
+get_order_timeline
+
+The backend should execute these tools independently.
+
+Gemini receives the results and correlates them.
+
+Example database state:
+
+Order:
+CONFIRMED
+
+Payment:
+SUCCESS
+
+Delivery:
+NOT_ASSIGNED
+
+Timeline:
+
+ORDER_CREATED
+PAYMENT_SUCCESS
+ORDER_CONFIRMED
+DELIVERY_ASSIGNMENT_FAILED
+
+Final response should explain:
+
+- payment succeeded
+- order is confirmed
+- delivery has not been assigned
+- relevant timeline event indicates delivery assignment failed
+
+The system must not invent missing information.
+
+============================================================
+8. AI TOOL DEFINITIONS
+============================================================
+
+Create a centralized ToolRegistry.
+
+The ToolRegistry is responsible for registering the tools available
+to Gemini.
+
+Required tools:
+
+1. get_order
+2. get_payment
+3. get_delivery
+4. get_customer
+5. get_order_timeline
+
+Optional:
+
+6. search_orders
+
+Only implement search_orders if it can be implemented cleanly.
+
+------------------------------------------------------------
+8.1 get_order
+------------------------------------------------------------
+
+Purpose:
+
+Retrieve order information.
+
+Input:
+
+orderId: integer/long
+
+Output:
+
+{
+  "orderId": 1289,
+  "customerId": 101,
+  "status": "CONFIRMED",
+  "totalAmount": 1499.00,
+  "currency": "INR",
+  "createdAt": "...",
+  "updatedAt": "..."
+}
+
+------------------------------------------------------------
+8.2 get_payment
+------------------------------------------------------------
+
+Purpose:
+
+Retrieve payment information for an order.
+
+Input:
+
+orderId
+
+Output:
+
+{
+  "orderId": 1289,
+  "status": "SUCCESS",
+  "amount": 1499.00,
+  "paymentMethod": "UPI",
+  "transactionId": "...",
+  "paidAt": "...",
+  "createdAt": "..."
+}
+
+------------------------------------------------------------
+8.3 get_delivery
+------------------------------------------------------------
+
+Purpose:
+
+Retrieve delivery information.
+
+Input:
+
+orderId
+
+Output:
+
+{
+  "orderId": 1289,
+  "status": "NOT_ASSIGNED",
+  "deliveryPartner": null,
+  "trackingNumber": null,
+  "expectedDeliveryDate": null,
+  "assignedAt": null,
+  "deliveredAt": null
+}
+
+------------------------------------------------------------
+8.4 get_customer
+------------------------------------------------------------
+
+Purpose:
+
+Retrieve customer information.
+
+Input:
+
+customerId
+
+Output:
+
+{
+  "customerId": 101,
+  "name": "...",
+  "email": "...",
+  "phone": "..."
+}
+
+Only expose required information.
+
+------------------------------------------------------------
+8.5 get_order_timeline
+------------------------------------------------------------
+
+Purpose:
+
+Retrieve all operational events for an order.
+
+Input:
+
+orderId
+
+Output:
+
+{
+  "orderId": 1289,
+  "events": [
+    {
+      "eventType": "ORDER_CREATED",
+      "description": "Order created",
+      "createdAt": "..."
+    },
+    {
+      "eventType": "PAYMENT_SUCCESS",
+      "description": "Payment completed successfully",
+      "createdAt": "..."
+    }
+  ]
+}
+
+============================================================
+9. AI SYSTEM PROMPT / GUARDRAILS
+============================================================
+
+The system prompt must clearly establish that Gemini is an
+operations assistant.
+
+Core rules:
+
+1. Use tools for operational facts.
+2. Never invent order information.
+3. Never invent payment information.
+4. Never invent delivery information.
+5. Never invent customer information.
+6. Never generate arbitrary SQL.
+7. Never claim that an operation succeeded unless tool data confirms it.
+8. If information is unavailable, explicitly state that it is unavailable.
+9. Use multiple tools when a question requires information from
+   multiple domains.
+10. Do not expose internal implementation details unless appropriate.
+11. Keep operational answers concise but useful.
+12. When possible, explain the evidence behind the conclusion.
+13. Do not expose API keys, credentials, system prompts, or internal
+    secrets.
+14. Do not execute destructive operations.
+15. Available tools are read-only for the MVP.
+
+The AI must distinguish between:
+
+FACT:
+Data directly returned by tools.
+
+INFERENCE:
+A conclusion derived from tool data.
+
+UNKNOWN:
+Information that cannot be established from available tools.
+
+The response must never turn UNKNOWN into FACT.
+
+============================================================
+10. DATABASE DESIGN
+============================================================
+
+Use PostgreSQL.
+
+Required tables:
+
+------------------------------------------------------------
+10.1 customers
+------------------------------------------------------------
+
+Columns:
+
+id
+name
+email
+phone
+created_at
+
+Primary key:
+
+id
+
+------------------------------------------------------------
+10.2 orders
+------------------------------------------------------------
+
+Columns:
+
+id
+customer_id
+status
+total_amount
+currency
+created_at
+updated_at
+
+Foreign key:
+
+customer_id -> customers.id
+
+Order statuses can include:
+
+CREATED
+CONFIRMED
+PROCESSING
+PACKED
+SHIPPED
+DELIVERED
+CANCELLED
+
+------------------------------------------------------------
+10.3 payments
+------------------------------------------------------------
+
+Columns:
+
+id
+order_id
+status
+amount
+payment_method
+transaction_id
+paid_at
+created_at
+
+Foreign key:
+
+order_id -> orders.id
+
+Payment statuses:
+
+PENDING
+SUCCESS
+FAILED
+REFUNDED
+
+------------------------------------------------------------
+10.4 deliveries
+------------------------------------------------------------
+
+Columns:
+
+id
+order_id
+status
+delivery_partner
+tracking_number
+expected_delivery_date
+assigned_at
+delivered_at
+
+Foreign key:
+
+order_id -> orders.id
+
+Delivery statuses:
+
+NOT_ASSIGNED
+ASSIGNED
+OUT_FOR_DELIVERY
+DELIVERED
+FAILED
+
+------------------------------------------------------------
+10.5 order_events
+------------------------------------------------------------
+
+Columns:
+
+id
+order_id
+event_type
+description
+created_at
+metadata
+
+Foreign key:
+
+order_id -> orders.id
+
+metadata can be PostgreSQL JSON/JSONB if appropriate.
+
+============================================================
+11. DATABASE INDEXING
+============================================================
+
+Add appropriate indexes.
+
+At minimum:
+
+orders.customer_id
+payments.order_id
+deliveries.order_id
+order_events.order_id
+order_events.created_at
+
+Queries used by the AI tools should be efficient.
+
+Do not add random indexes without a query/use-case reason.
+
+============================================================
+12. SEED DATA
+============================================================
+
+Create realistic seed data.
+
+File:
+
+database/seed.sql
+
+The seed data should include:
+
+- realistic customers
+- realistic orders
+- realistic payments
+- realistic deliveries
+- realistic timeline events
+
+Create at least 5 important demo scenarios.
+
+------------------------------------------------------------
+SCENARIO 1
+------------------------------------------------------------
+
+Order:
+
+4521
+
+Payment:
+
+SUCCESS
+
+Delivery:
+
+ASSIGNED or OUT_FOR_DELIVERY
+
+Used for basic status questions.
+
+------------------------------------------------------------
+SCENARIO 2
+------------------------------------------------------------
+
+Order:
+
+1289
+
+Payment:
+
+SUCCESS
+
+Order:
+
+CONFIRMED
+
+Delivery:
+
+NOT_ASSIGNED
+
+Timeline includes:
+
+DELIVERY_ASSIGNMENT_FAILED
+
+This is the primary multi-tool investigation demo.
+
+------------------------------------------------------------
+SCENARIO 3
+------------------------------------------------------------
+
+Order:
+
+2231
+
+Payment:
+
+PENDING
+
+Delivery:
+
+NOT_ASSIGNED
+
+Used to demonstrate pending payment.
+
+------------------------------------------------------------
+SCENARIO 4
+------------------------------------------------------------
+
+An order with:
+
+Payment = FAILED
+
+Delivery = NOT_ASSIGNED
+
+Used for failure scenarios.
+
+------------------------------------------------------------
+SCENARIO 5
+------------------------------------------------------------
+
+An order with:
+
+Payment = SUCCESS
+Delivery = DELIVERED
+
+Used for successful completed order.
+
+------------------------------------------------------------
+SCENARIO 6
+------------------------------------------------------------
+
+Non-existent order:
+
+999999
+
+Used to demonstrate NOT_FOUND handling.
+
+The seed script must be deterministic.
+
+============================================================
+13. REST API DESIGN
+============================================================
+
+------------------------------------------------------------
+13.1 Copilot Query
+------------------------------------------------------------
+
+POST
+
+/api/v1/copilot/query
+
+Request:
+
+{
+  "query": "What's the payment status for order #4521?"
+}
+
+Validation:
+
+- query must not be null
+- query must not be blank
+- query must have a reasonable maximum length
+
+Response:
+
+{
+  "requestId": "req_xxxxx",
+  "answer": "...",
+  "intent": "PAYMENT_STATUS",
+  "orderId": 4521,
+  "toolsUsed": [
+    "get_payment"
+  ]
+}
+
+------------------------------------------------------------
+13.2 Get Order
+------------------------------------------------------------
+
+GET
+
+/api/v1/orders/{orderId}
+
+Returns order details.
+
+------------------------------------------------------------
+13.3 Get Payment
+------------------------------------------------------------
+
+GET
+
+/api/v1/orders/{orderId}/payment
+
+Returns payment details.
+
+------------------------------------------------------------
+13.4 Get Delivery
+------------------------------------------------------------
+
+GET
+
+/api/v1/orders/{orderId}/delivery
+
+Returns delivery details.
+
+------------------------------------------------------------
+13.5 Get Timeline
+------------------------------------------------------------
+
+GET
+
+/api/v1/orders/{orderId}/timeline
+
+Returns chronological order events.
+
+------------------------------------------------------------
+13.6 Optional Customer API
+------------------------------------------------------------
+
+GET
+
+/api/v1/customers/{customerId}
+
+Only add this if it improves the architecture/demo.
+
+============================================================
+14. RESPONSE FORMAT
+============================================================
+
+Copilot responses should be structured.
+
+Example:
+
+{
+  "requestId": "req_8f91a",
+  "answer": "Order #1289 has been paid successfully, but delivery has not yet been scheduled. The order is confirmed and the timeline shows that delivery assignment failed.",
+  "intent": "ORDER_INVESTIGATION",
+  "orderId": 1289,
+  "toolsUsed": [
+    "get_order",
+    "get_payment",
+    "get_delivery",
+    "get_order_timeline"
+  ]
+}
+
+Optional evidence:
+
+{
+  "evidence": [
+    "Payment status: SUCCESS",
+    "Order status: CONFIRMED",
+    "Delivery status: NOT_ASSIGNED",
+    "Timeline event: DELIVERY_ASSIGNMENT_FAILED"
+  ]
+}
+
+Evidence should only contain facts returned from backend tools.
+
+============================================================
+15. ERROR HANDLING
+============================================================
+
+Implement centralized exception handling.
+
+Use:
+
+@RestControllerAdvice
+
+Handle:
+
+- validation errors
+- resource not found
+- database errors
+- Gemini API failures
+- Gemini timeout
+- Gemini rate limit
+- malformed AI response
+- tool execution failure
+- unexpected exceptions
+
+Never expose stack traces to clients.
+
+Example:
+
+{
+  "error": "ORDER_NOT_FOUND",
+  "message": "Order 999999 does not exist",
+  "requestId": "req_xxxxx"
+}
+
+HTTP statuses:
+
+400:
+Invalid request
+
+404:
+Resource not found
+
+429:
+Rate limit / provider rate limit where appropriate
+
+500:
+Unexpected internal failure
+
+502/503:
+External AI provider unavailable, depending on chosen semantics
+
+============================================================
+16. GEMINI FAILURE HANDLING
+============================================================
+
+Gemini is an external dependency.
+
+The application must handle:
+
+- timeout
+- HTTP errors
+- rate limiting
+- malformed responses
+- unavailable service
+- invalid API key
+- tool-calling errors
+
+Implement reasonable timeout configuration.
+
+Do not retry blindly.
+
+If retries are implemented:
+
+- use limited retries
+- exponential backoff
+- retry only transient failures
+- do not retry invalid requests or authentication errors
+
+If Gemini remains unavailable after retry policy:
+
+Return a safe error response.
+
+============================================================
+17. TOOL EXECUTION SAFETY
+============================================================
+
+Tools must be deterministic backend functions.
+
+Gemini provides arguments.
+
+Backend validates arguments.
+
+Backend invokes service.
+
+Service invokes repository.
+
+Repository queries PostgreSQL.
+
+Flow:
+
+Gemini
+  |
+  v
+Tool
+  |
+  v
+Argument Validation
+  |
+  v
+Service
+  |
+  v
+Repository
+  |
+  v
+PostgreSQL
+
+Never allow:
+
+Gemini
+  |
+  v
+Raw SQL
+  |
+  v
+PostgreSQL
+
+The AI cannot:
+
+- execute SQL
+- execute shell commands
+- access filesystem
+- modify database records
+- modify payments
+- modify deliveries
+- access environment variables
+- access secrets
+
+All MVP tools are read-only.
+
+============================================================
+18. TOOL REGISTRY
+============================================================
+
+Create a ToolRegistry abstraction.
+
+Responsibilities:
+
+- register tools
+- expose tool definitions to Gemini
+- map tool names to backend implementations
+- validate supported tool names
+- execute only registered tools
+
+Unknown tool name:
+
+Return controlled error.
+
+Never dynamically execute arbitrary Java methods based on LLM output.
+
+============================================================
+19. AI ORCHESTRATION
+============================================================
+
+Implement an explicit orchestration loop.
+
+Conceptual flow:
+
+while tool calls are requested:
+
+    validate tool name
+
+    validate arguments
+
+    execute tool
+
+    collect result
+
+    send tool result back to Gemini
+
+Stop when:
+
+- Gemini returns final answer
+- maximum tool-call iterations reached
+- unrecoverable tool error occurs
+
+Maximum iterations:
+
+5
+
+This must be configurable.
+
+Prevent infinite loops.
+
+Record tools used during the request.
+
+============================================================
+20. INTENT HANDLING
+============================================================
+
+The system should support logical intents such as:
+
+ORDER_STATUS
+PAYMENT_STATUS
+DELIVERY_STATUS
+CUSTOMER_LOOKUP
+ORDER_TIMELINE
+ORDER_INVESTIGATION
+UNKNOWN
+
+Intent can be derived by Gemini or represented as metadata based
+on the orchestration.
+
+Do not make intent classification a separate unnecessary LLM call
+if the Gemini tool-calling flow already provides enough information.
+
+Avoid unnecessary AI calls.
+
+============================================================
+21. OBSERVABILITY
+============================================================
+
+Every Copilot request must receive a requestId.
+
+Example:
+
+req_8f91a
+
+Include requestId in:
+
+- logs
+- error responses
+- final response metadata
+
+Structured logging should capture:
+
+- requestId
+- endpoint
+- intent if known
+- tools requested
+- tools executed
+- tool execution duration
+- Gemini request duration
+- total request duration
+- success/failure
+- error category
+
+NEVER log:
+
+- GEMINI_API_KEY
+- authorization credentials
+- sensitive secrets
+- complete sensitive customer data
+
+============================================================
+22. LOGGING
+============================================================
+
+Use SLF4J/Logback or Spring Boot default logging.
+
+Prefer structured logs where practical.
+
+Example:
+
+requestId=req_123
+event=TOOL_EXECUTION
+tool=get_payment
+orderId=1289
+durationMs=15
+
+Another example:
+
+requestId=req_123
+event=GEMINI_CALL
+durationMs=820
+status=SUCCESS
+
+Do not log raw secrets.
+
+Do not log full prompts if they can contain sensitive data.
+
+============================================================
+23. VALIDATION
+============================================================
+
+Use Jakarta Bean Validation.
+
+Copilot request:
+
+query:
+
+- required
+- non-empty
+- max length
+
+IDs:
+
+- must be positive
+
+Reject malformed input before database access.
+
+============================================================
+24. API DOCUMENTATION
+============================================================
+
+Integrate OpenAPI/Swagger.
+
+Swagger UI must document:
+
+POST /api/v1/copilot/query
+
+GET /api/v1/orders/{orderId}
+
+GET /api/v1/orders/{orderId}/payment
+
+GET /api/v1/orders/{orderId}/delivery
+
+GET /api/v1/orders/{orderId}/timeline
+
+Document:
+
+- request bodies
+- responses
+- validation errors
+- not-found responses
+- example requests
+- example responses
+
+============================================================
+25. PROJECT STRUCTURE
+============================================================
+
+Recommended structure:
+
+ops-copilot/
+|
++-- src/
+|   |
+|   +-- main/
+|       |
+|       +-- java/
+|       |   |
+|       |   +-- com/
+|       |       +-- opscopilot/
+|       |           |
+|       |           +-- controller/
+|       |           |
+|       |           +-- service/
+|       |           |
+|       |           +-- repository/
+|       |           |
+|       |           +-- entity/
+|       |           |
+|       |           +-- dto/
+|       |           |
+|       |           +-- ai/
+|       |           |
+|       |           +-- exception/
+|       |           |
+|       |           +-- config/
+|       |           |
+|       |           +-- mapper/
+|       |           |
+|       |           +-- validation/
+|       |
+|       +-- resources/
+|           |
+|           +-- application.yml
+|
++-- src/test/
+|
++-- database/
+|   |
+|   +-- seed.sql
+|
++-- docs/
+|
++-- Dockerfile
++-- docker-compose.yml
++-- pom.xml
++-- README.md
++-- DESIGN.md
++-- .env.example
++-- .gitignore
++-- plan.txt
+
+Use package names that match the actual project.
+
+Do not blindly create classes that are not required.
+
+Keep responsibilities separated.
+
+============================================================
+26. LAYERING
+============================================================
+
+Use clear separation:
+
+Controller
+    |
+    v
+Service
+    |
+    v
+Repository
+    |
+    v
+Database
+
+AI:
+
+CopilotService
+    |
+    v
+LLMClient
+    |
+    v
+Gemini
+
+Tools:
+
+Tool
+    |
+    v
+Service
+    |
+    v
+Repository
+
+Controllers must not directly query repositories.
+
+AI classes must not contain database queries.
+
+Repositories must not contain business logic.
+
+============================================================
+27. ENTITY DESIGN
+============================================================
+
+Use JPA entities.
+
+Required entities:
+
+Customer
+Order
+Payment
+Delivery
+OrderEvent
+
+Use:
+
+- appropriate primary keys
+- foreign keys
+- enums for statuses
+- timestamps
+- relationships where appropriate
+
+Avoid excessive bidirectional relationships that can cause:
+
+- serialization loops
+- unnecessary loading
+- complicated entity graphs
+
+Prefer DTOs for API responses.
+
+Do not expose JPA entities directly from controllers.
+
+============================================================
+28. DTO DESIGN
+============================================================
+
+Create request/response DTOs.
+
+Examples:
+
+CopilotRequest
+CopilotResponse
+OrderResponse
+PaymentResponse
+DeliveryResponse
+CustomerResponse
+OrderTimelineResponse
+OrderEventResponse
+ErrorResponse
+
+Keep DTOs separate from persistence entities.
+
+============================================================
+29. DATABASE ACCESS
+============================================================
+
+Use Spring Data JPA repositories.
+
+Examples:
+
+OrderRepository
+PaymentRepository
+DeliveryRepository
+CustomerRepository
+OrderEventRepository
+
+Queries should be simple and readable.
+
+Order timeline must be ordered chronologically.
+
+Use database-level constraints wherever useful.
+
+============================================================
+30. TRANSACTION MANAGEMENT
+============================================================
+
+Use @Transactional appropriately.
+
+Read-only operations should use:
+
+@Transactional(readOnly = true)
+
+where beneficial.
+
+Do not add transactions everywhere without reason.
+
+============================================================
+31. SECURITY
+============================================================
+
+MVP does not require a full authentication system unless required
+by the assignment.
+
+However, security principles must be documented.
+
+Important:
+
+- API keys through environment variables
+- no secrets in source control
+- no arbitrary SQL
+- no arbitrary tool execution
+- input validation
+- controlled error responses
+- no stack traces to users
+- least-privilege database user where possible
+
+The database user used by the application should have only the
+permissions required by the application.
+
+For MVP, all AI tools should be read-only.
+
+============================================================
+32. TESTING STRATEGY
+============================================================
+
+Testing must cover:
+
+------------------------------------------------------------
+32.1 Unit Tests
+------------------------------------------------------------
+
+Test:
+
+OrderService
+PaymentService
+DeliveryService
+CustomerService
+OrderTimelineService
+CopilotService
+ToolRegistry
+
+Use Mockito where appropriate.
+
+------------------------------------------------------------
+32.2 Controller Tests
+------------------------------------------------------------
+
+Test:
+
+- valid request
+- blank query
+- oversized query
+- invalid order ID
+- not found
+- internal error
+
+------------------------------------------------------------
+32.3 Repository/Integration Tests
+------------------------------------------------------------
+
+Use PostgreSQL/Testcontainers where practical.
+
+Verify:
+
+- orders can be retrieved
+- payments can be retrieved
+- deliveries can be retrieved
+- timelines are correctly ordered
+- missing orders return not found
+
+------------------------------------------------------------
+32.4 AI Orchestration Tests
+------------------------------------------------------------
+
+Do not make the majority of tests depend on a live Gemini API.
+
+Mock the LLM layer.
+
+Test scenarios:
+
+Scenario A:
+
+Input:
+
+"What's the payment status for order #4521?"
+
+Expected:
+
+get_payment
+
+Scenario B:
+
+Input:
+
+"Customer paid for order #1289 but delivery isn't scheduled."
+
+Expected tools include:
+
+get_order
+get_payment
+get_delivery
+
+Potentially:
+
+get_order_timeline
+
+Scenario C:
+
+Input:
+
+"Give me a full status summary for order #2231."
+
+Expected multiple relevant tools.
+
+Scenario D:
+
+Unknown order.
+
+Expected controlled handling.
+
+Scenario E:
+
+LLM unavailable.
+
+Expected safe error response.
+
+============================================================
+33. AI MOCKING
+============================================================
+
+LLMClient must be mockable.
+
+Do not tightly couple CopilotService directly to HTTP calls.
+
+Example architecture:
+
+CopilotService
+      |
+      v
+LLMClient interface
+      |
+      +----------------------+
+      |                      |
+      v                      v
+GeminiLLMClient          MockLLMClient
+
+Production:
+
+GeminiLLMClient
+
+Tests:
+
+Mock LLM
+
+This makes tests deterministic.
+
+============================================================
+34. DOCKER
+============================================================
+
+Create Dockerfile for backend.
+
+Create docker-compose.yml containing at minimum:
+
+backend
+postgres
+
+Expected architecture:
+
+docker compose up
+
+should start the application and database.
+
+PostgreSQL configuration must use environment variables.
+
+Do not hardcode production secrets.
+
+Database should have persistent volume for local development if
+appropriate.
+
+============================================================
+35. APPLICATION CONFIGURATION
+============================================================
+
+Use application.yml.
+
+Configuration should include:
+
+server port
+database URL
+database username
+database password
+Gemini API configuration
+Gemini model
+timeouts
+maximum tool iterations
+logging configuration
+
+Environment-specific values must be externalized.
+
+Example:
+
+${GEMINI_API_KEY}
+
+Do not hardcode secrets.
+
+============================================================
+36. HEALTH CHECK
+============================================================
+
+Provide a health endpoint.
+
+Example:
+
+GET /actuator/health
+
+Add Spring Boot Actuator if appropriate.
+
+The application health should indicate basic service health.
+
+Do not expose sensitive configuration information.
+
+============================================================
+37. OPTIONAL RATE LIMITING
+============================================================
+
+If implementation time permits, add basic rate limiting to:
+
+POST /api/v1/copilot/query
+
+This should be implemented only if it can be done cleanly.
+
+Do not add unnecessary infrastructure solely for complexity.
+
+Redis may be used if rate limiting or caching genuinely benefits
+the project.
+
+Otherwise omit Redis.
+
+============================================================
+38. OPTIONAL CACHING
+============================================================
+
+Caching can be considered for read-heavy operations:
+
+get_order
+get_payment
+get_delivery
+
+If implemented:
+
+- use short TTL
+- invalidate appropriately if writes are later introduced
+- document cache behavior
+
+Do not cache AI final responses by default because natural-language
+queries may have different contexts.
+
+Caching is optional.
+
+============================================================
+39. NO UNNECESSARY MICROSERVICES
+============================================================
+
+The application should be a modular monolith.
+
+Do NOT split into:
+
+order-service
+payment-service
+delivery-service
+AI-service
+
+unless there is a strong reason.
+
+The assignment can demonstrate good separation using modules/packages
+inside one Spring Boot application.
+
+The architecture should be easy to run locally.
+
+The DESIGN.md should explain that this is intentionally a modular
+monolith for simplicity and maintainability at the assignment scale.
+
+============================================================
+40. NO UNNECESSARY INFRASTRUCTURE
+============================================================
+
+Do not introduce:
+
+- Kafka
+- Kubernetes
+- Elasticsearch
+- RabbitMQ
+- Airflow
+- multiple databases
+- vector database
+- RAG
+- fine tuning
+- complex agent frameworks
+
+unless a real requirement emerges.
+
+The main problem is operational data retrieval and AI orchestration.
+
+Keep the architecture focused.
+
+============================================================
+41. DEMO QUESTIONS
+============================================================
+
+The README must include working example queries.
+
+Example 1:
+
+"What's the payment status for order #4521?"
+
+Expected:
+
+Gemini calls get_payment.
+
+Example 2:
+
+"Has order #4521 been paid?"
+
+Expected:
+
+get_payment.
+
+Example 3:
+
+"When will order #4521 be delivered?"
+
+Expected:
+
+get_delivery.
+
+Example 4:
+
+"What happened with order #1289?"
+
+Expected:
+
+get_order_timeline and potentially get_order.
+
+Example 5:
+
+"Customer says they've paid for order #1289 but delivery isn't
+scheduled. What's going on?"
+
+Expected:
+
+get_order
+get_payment
+get_delivery
+get_order_timeline
+
+The final answer should correlate the results.
+
+Example 6:
+
+"Give me a full status summary for order #2231."
+
+Expected:
+
+order/payment/delivery information as required.
+
+Example 7:
+
+"Does order #999999 exist?"
+
+Expected:
+
+controlled not-found answer.
+
+============================================================
+42. AI RESPONSE QUALITY
+============================================================
+
+The final AI response should be:
+
+- accurate
+- concise
+- operationally useful
+- based on tool results
+- explicit about unknown information
+- free from hallucinated facts
+
+Bad:
+
+"Your order is probably delayed because of logistics."
+
+Good:
+
+"Order #1289 has been paid successfully and is confirmed.
+Delivery is currently NOT_ASSIGNED. The timeline also shows a
+DELIVERY_ASSIGNMENT_FAILED event, so the order is currently waiting
+for delivery assignment."
+
+The answer must distinguish facts from assumptions.
+
+============================================================
+43. EVIDENCE
+============================================================
+
+If implemented, CopilotResponse can include evidence.
+
+Example:
+
+{
+  "evidence": [
+    {
+      "source": "payment",
+      "fact": "Payment status is SUCCESS"
+    },
+    {
+      "source": "delivery",
+      "fact": "Delivery status is NOT_ASSIGNED"
+    },
+    {
+      "source": "timeline",
+      "fact": "Delivery assignment failed"
+    }
+  ]
+}
+
+Evidence must come from tool results.
+
+Do not allow Gemini to fabricate evidence.
+
+============================================================
+44. REQUEST ID
+============================================================
+
+Generate a unique requestId for every Copilot request.
+
+Example:
+
+req_7a91f21b
+
+The request ID should be returned in:
+
+- API response
+- error response
+- logs
+
+This makes debugging easier.
+
+============================================================
+45. TIMEOUTS
+============================================================
+
+Configure:
+
+- HTTP request timeout
+- database timeout where appropriate
+- Gemini timeout
+- tool execution limits
+- maximum tool call iterations
+
+Never allow an AI request to hang indefinitely.
+
+============================================================
+46. RETRY AND RESILIENCE
+============================================================
+
+External Gemini failures should be handled gracefully.
+
+If retry is implemented:
+
+- maximum retry count must be small
+- use exponential backoff
+- retry only transient failures
+- never retry invalid API key errors
+- never retry malformed requests indefinitely
+
+If the external AI service is unavailable:
+
+Return:
+
+{
+  "error": "AI_SERVICE_UNAVAILABLE",
+  "message": "The operations assistant is temporarily unavailable.",
+  "requestId": "req_xxxxx"
+}
+
+============================================================
+47. DOCUMENTATION — README.md
+============================================================
+
+README.md must contain:
+
+1. Project overview
+2. Problem statement
+3. Solution overview
+4. Architecture diagram
+5. Core features
+6. Tech stack
+7. Project structure
+8. Prerequisites
+9. Gemini API configuration
+10. Environment variables
+11. Local setup
+12. Docker setup
+13. Database setup
+14. Seed data
+15. Swagger URL
+16. API examples
+17. AI query examples
+18. Testing instructions
+19. Error handling
+20. Security considerations
+21. Design decisions
+22. Scalability
+23. Limitations
+24. Future improvements
+
+README must allow a reviewer to understand and run the project
+without asking the developer for additional information.
+
+============================================================
+48. DOCUMENTATION — DESIGN.md
+============================================================
+
+DESIGN.md must explain:
+
+1. Requirements
+2. Functional requirements
+3. Non-functional requirements
+4. Architecture
+5. Request flow
+6. AI orchestration
+7. Tool-calling architecture
+8. Database design
+9. Data relationships
+10. Error handling
+11. Security
+12. Observability
+13. Scalability
+14. Failure scenarios
+15. Trade-offs
+16. Why modular monolith
+17. Why LLM does not access DB directly
+18. Future improvements
+
+Include architecture diagrams using Mermaid where appropriate.
+
+Example:
+
+```mermaid
+flowchart TD
+    Client --> Controller
+    Controller --> CopilotService
+    CopilotService --> Gemini
+    Gemini --> ToolRegistry
+    ToolRegistry --> OrderService
+    ToolRegistry --> PaymentService
+    ToolRegistry --> DeliveryService
+    OrderService --> PostgreSQL
+    PaymentService --> PostgreSQL
+    DeliveryService --> PostgreSQL
+````
+
+============================================================
+49. ENVIRONMENT FILES
+=====================
+
+Create:
+
+.env.example
+
+Example contents:
+
+GEMINI_API_KEY=
+GEMINI_MODEL=
+
+DB_HOST=localhost
+DB_PORT=5432
+DB_NAME=opscopilot
+DB_USERNAME=
+DB_PASSWORD=
+
+Do not commit the real .env file.
+
+Add .env to .gitignore.
+
+============================================================
+50. GITIGNORE
+=============
+
+.gitignore must include:
+
+.env
+target/
+.idea/
+*.iml
+*.log
+.DS_Store
+
+and other appropriate Java/IDE generated files.
+
+============================================================
+51. CODE QUALITY
+================
+
+Code must follow clean Java practices.
+
+Requirements:
+
+* meaningful class names
+* meaningful method names
+* small focused methods
+* constructor injection
+* no field injection
+* no duplicated business logic
+* no unnecessary abstractions
+* no dead code
+* no commented-out code
+* no hardcoded secrets
+* no magic strings where constants/enums are appropriate
+* proper exception handling
+* proper logging
+
+Prefer readability over cleverness.
+
+============================================================
+52. JAVA VERSION
+================
+
+Use Java 21.
+
+Use modern Java features only where they improve readability.
+
+Do not use advanced language features just to demonstrate them.
+
+============================================================
+53. SPRING BOOT PRACTICES
+=========================
+
+Use:
+
+* @RestController
+* @Service
+* @Repository where appropriate
+* constructor injection
+* @ConfigurationProperties for grouped configuration where useful
+* @RestControllerAdvice
+* validation annotations
+* Actuator where useful
+* transactional boundaries
+
+Do not overuse annotations.
+
+============================================================
+54. AI CLIENT DESIGN
+====================
+
+Gemini integration should be isolated.
+
+Conceptually:
+
+interface LLMClient {
+
+```
+LLMResponse execute(...);
+```
+
+}
+
+Implementation:
+
+GeminiLLMClient
+
+Responsibilities:
+
+* construct Gemini request
+* send request
+* handle response
+* map Gemini tool calls
+* map Gemini final answer
+* handle provider errors
+
+CopilotService should not contain low-level HTTP code.
+
+============================================================
+55. TOOL RESULT DESIGN
+======================
+
+Tool results should be structured.
+
+Do not return giant unstructured text blobs.
+
+Example:
+
+{
+"tool": "get_payment",
+"success": true,
+"data": {
+"orderId": 1289,
+"status": "SUCCESS",
+"amount": 1499.00
+}
+}
+
+Failure:
+
+{
+"tool": "get_order",
+"success": false,
+"error": {
+"code": "ORDER_NOT_FOUND",
+"message": "Order 999999 does not exist"
+}
+}
+
+============================================================
+56. UNKNOWN / MISSING DATA
+==========================
+
+If a database field is missing:
+
+Do not invent it.
+
+Example:
+
+Expected delivery date = null
+
+Gemini should say:
+
+"The expected delivery date is not currently available."
+
+Not:
+
+"It will arrive tomorrow."
+
+============================================================
+57. DATABASE SOURCE OF TRUTH
+============================
+
+All operational facts must originate from PostgreSQL.
+
+Examples:
+
+Order status -> PostgreSQL
+Payment status -> PostgreSQL
+Delivery status -> PostgreSQL
+Customer -> PostgreSQL
+Timeline -> PostgreSQL
+
+Gemini only interprets these facts.
+
+============================================================
+58. PERFORMANCE
+===============
+
+Avoid unnecessary database calls.
+
+For a simple question:
+
+"What is the payment status of order 4521?"
+
+Do not retrieve:
+
+customer
+delivery
+timeline
+
+unless Gemini determines they are needed.
+
+For an investigation question:
+
+"Customer paid but delivery isn't scheduled."
+
+Multiple tools are expected.
+
+The architecture should therefore support dynamic tool selection.
+
+============================================================
+59. SCALABILITY DESIGN
+======================
+
+Current architecture:
+
+Client
+|
+Spring Boot
+|
+PostgreSQL
+|
+Gemini
+
+Potential future scaling:
+
+```
+             Load Balancer
+                  |
+      +-----------+-----------+
+      |           |           |
+   Backend     Backend     Backend
+      |           |           |
+      +-----------+-----------+
+                  |
+             PostgreSQL
+                  |
+            Read Replicas
+```
+
+AI resilience can later include:
+
+* dedicated LLM gateway
+* circuit breaker
+* caching
+* provider fallback
+* asynchronous workflows
+* queue-based long-running investigations
+
+These should be documented as future improvements, not necessarily
+implemented.
+
+============================================================
+60. FAILURE SCENARIOS
+=====================
+
+The system design must explicitly consider:
+
+1. PostgreSQL unavailable.
+2. Gemini unavailable.
+3. Gemini timeout.
+4. Gemini rate limit.
+5. Invalid Gemini API key.
+6. Tool returns not found.
+7. Tool returns malformed data.
+8. Gemini requests unknown tool.
+9. Gemini requests invalid arguments.
+10. Gemini exceeds tool-call limit.
+11. Invalid client request.
+12. Unexpected backend exception.
+
+Each must have controlled behavior.
+
+============================================================
+61. READ-ONLY AI
+================
+
+The MVP AI tools must be read-only.
+
+Gemini can retrieve:
+
+* order
+* payment
+* delivery
+* customer
+* timeline
+
+Gemini cannot:
+
+* cancel order
+* refund payment
+* change delivery
+* change customer
+* delete records
+* update payment
+* execute arbitrary commands
+
+This reduces risk and keeps the system appropriate for an
+operations-assistant MVP.
+
+============================================================
+62. OPTIONAL FUTURE FEATURES
+============================
+
+Document these as future improvements:
+
+1. Authentication/authorization.
+2. Role-based access control.
+3. Conversation history.
+4. Redis caching.
+5. Rate limiting.
+6. Audit logs.
+7. Human escalation.
+8. Agent approval workflows.
+9. Read/write tools with confirmation.
+10. Multi-tenant architecture.
+11. LLM provider fallback.
+12. Streaming responses.
+13. Advanced analytics.
+14. Dashboard.
+15. Async investigation jobs.
+16. Kafka/event-driven architecture.
+17. Kubernetes deployment.
+
+Do not implement these unless they clearly improve the MVP.
+
+============================================================
+63. FRONTEND
+============
+
+No dedicated frontend is required for the MVP.
+
+Primary interfaces:
+
+* REST API
+* Swagger UI
+* Postman/cURL examples
+
+A frontend can be documented as a future improvement.
+
+============================================================
+64. SECURITY OF GEMINI API KEY
+==============================
+
+This requirement is mandatory.
+
+Gemini API key must be supplied using environment configuration.
+
+Correct:
+
+GEMINI_API_KEY=${GEMINI_API_KEY}
+
+Incorrect:
+
+private final String API_KEY = "AIza....";
+
+Never expose the API key in:
+
+* source code
+* README
+* logs
+* API responses
+* screenshots
+* Git history
+* Docker image layers
+
+The repository should only contain:
+
+.env.example
+
+with an empty/example placeholder.
+
+============================================================
+65. API EXAMPLES
+================
+
+README must include cURL examples.
+
+Example:
+
+curl -X POST [http://localhost:8080/api/v1/copilot/query](http://localhost:8080/api/v1/copilot/query) 
+-H "Content-Type: application/json" 
+-d '{
+"query": "What is the payment status for order #4521?"
+}'
+
+Another:
+
+curl -X POST [http://localhost:8080/api/v1/copilot/query](http://localhost:8080/api/v1/copilot/query) 
+-H "Content-Type: application/json" 
+-d '{
+"query": "Customer says they paid for order #1289 but delivery is not scheduled. What is going on?"
+}'
+
+Also document direct REST endpoints.
+
+============================================================
+66. ACCEPTANCE CRITERIA
+=======================
+
+The project is considered complete only when all of the following
+are true:
+
+[ ] Spring Boot application starts successfully.
+
+[ ] PostgreSQL starts successfully.
+
+[ ] Docker Compose starts the complete local environment.
+
+[ ] Database schema is created successfully.
+
+[ ] Seed data is available.
+
+[ ] GET /api/v1/orders/{id} works.
+
+[ ] GET /api/v1/orders/{id}/payment works.
+
+[ ] GET /api/v1/orders/{id}/delivery works.
+
+[ ] GET /api/v1/orders/{id}/timeline works.
+
+[ ] POST /api/v1/copilot/query works.
+
+[ ] Gemini integration works using GEMINI_API_KEY.
+
+[ ] Gemini can select get_payment.
+
+[ ] Gemini can select get_order.
+
+[ ] Gemini can select get_delivery.
+
+[ ] Gemini can select get_customer.
+
+[ ] Gemini can select get_order_timeline.
+
+[ ] Multi-tool investigation works.
+
+[ ] Unknown orders are handled correctly.
+
+[ ] Invalid input is rejected.
+
+[ ] Gemini failure is handled safely.
+
+[ ] Tool execution is bounded.
+
+[ ] No arbitrary SQL is generated/executed by Gemini.
+
+[ ] No secrets are committed.
+
+[ ] Request IDs are generated.
+
+[ ] Important operations are logged.
+
+[ ] Swagger documentation works.
+
+[ ] Unit tests pass.
+
+[ ] Integration tests pass.
+
+[ ] README is complete.
+
+[ ] DESIGN.md is complete.
+
+[ ] Fresh-clone setup instructions work.
+
+============================================================
+67. QUALITY BAR
+===============
+
+The final implementation must prioritize:
+
+CORRECTNESS
+over
+COMPLEXITY
+
+RELIABILITY
+over
+NUMBER OF FEATURES
+
+CLEAR ARCHITECTURE
+over
+OVERENGINEERING
+
+DETERMINISTIC BACKEND DATA
+over
+LLM GUESSING
+
+The final project should look like a backend engineer designed
+an AI-enabled production system.
+
+It should NOT look like:
+
+"send prompt to Gemini and print response."
+
+Instead:
+
+User
+|
+v
+Spring Boot
+|
+v
+Copilot Service
+|
+v
+Gemini
+|
+v
+Controlled Tool Calls
+|
+v
+Business Services
+|
+v
+PostgreSQL
+|
+v
+Tool Results
+|
+v
+Gemini
+|
+v
+Reliable Operational Answer
+
+============================================================
+68. IMPLEMENTATION RULE FOR AI AGENT
+====================================
+
+When implementing this project, do not generate the entire project
+blindly in one step.
+
+First establish:
+
+* package structure
+* Maven dependencies
+* configuration
+* database schema
+* entities
+* repositories
+* services
+* DTOs
+* REST APIs
+* AI abstractions
+* tools
+* orchestration
+* tests
+* Docker
+* documentation
+
+After each major component, ensure the code is internally consistent.
+
+Do not create references to classes that do not exist.
+
+Do not create unused dependencies.
+
+Do not create duplicate classes.
+
+Do not introduce libraries unless required.
+
+Keep the project compilable throughout implementation.
+
+============================================================
+69. FINAL VALIDATION
+====================
+
+Before considering the project complete, perform a full validation.
+
+Run:
+
+* Maven compilation
+* unit tests
+* integration tests
+* application startup
+* database connectivity
+* Swagger verification
+* direct API verification
+* Gemini query verification
+* multi-tool query verification
+* error scenario verification
+* Docker Compose verification
+
+Test from a clean environment.
+
+Verify:
+
+1. No missing environment variables.
+2. No hardcoded secrets.
+3. No compilation errors.
+4. No failing tests.
+5. No broken API endpoints.
+6. No database schema errors.
+7. No Gemini integration errors.
+8. No infinite tool loops.
+9. No unhandled exceptions.
+10. README instructions actually work.
+
+============================================================
+70. FINAL PROJECT DELIVERABLE
+=============================
+
+The final repository must contain:
+
+ops-copilot/
+|
++-- src/
++-- src/test/
++-- database/
+|   +-- seed.sql
+|
++-- docs/
+|
++-- Dockerfile
++-- docker-compose.yml
++-- pom.xml
++-- README.md
++-- DESIGN.md
++-- .env.example
++-- .gitignore
++-- plan.txt
+
+The finished system must provide a complete AI Operations Copilot
+that:
+
+1. Accepts natural-language operational questions.
+2. Uses Google Gemini.
+3. Uses Gemini tool/function calling.
+4. Retrieves real data from PostgreSQL.
+5. Supports order/payment/delivery/customer/timeline investigation.
+6. Supports multi-tool reasoning.
+7. Prevents arbitrary SQL access.
+8. Prevents operational hallucination through tool-based facts.
+9. Handles errors and external AI failures.
+10. Provides request IDs and structured logging.
+11. Provides Swagger documentation.
+12. Includes tests.
+13. Runs through Docker Compose.
+14. Includes realistic deterministic seed data.
+15. Includes complete README and system design documentation.
+
+For the **frontend**, I’d recommend adding a lightweight **Next.js + React + Tailwind CSS** frontend.
+
+The final architecture becomes:
+
+```text
+                    ┌─────────────────────┐
+                    │      Frontend       │
+                    │ Next.js + React      │
+                    │ Tailwind CSS         │
+                    └──────────┬──────────┘
+                               │
+                         REST / JSON
+                               │
+                               ▼
+                    ┌─────────────────────┐
+                    │   Spring Boot API   │
+                    │    Java 21           │
+                    └──────────┬──────────┘
+                               │
+                    ┌──────────┴──────────┐
+                    │                     │
+                    ▼                     ▼
+                 Gemini              PostgreSQL
+                  LLM                    DB
+```
+
+### Frontend features
+
+I'd build a **proper Operations Copilot UI**, not just a basic form:
+
+* 💬 Chat-style interface for asking operational questions
+* Suggested queries:
+
+  * `What's the payment status for order #4521?`
+  * `Investigate order #1289`
+  * `Give me a full status summary for order #2231`
+* AI response displayed as a conversation
+* **Tool execution visibility**
+
+  * `✓ Order lookup`
+  * `✓ Payment lookup`
+  * `✓ Delivery lookup`
+  * `✓ Timeline lookup`
+* Evidence/facts section showing what the answer was based on
+* Order summary cards
+* Payment status badge
+* Delivery status badge
+* Order timeline visualization
+* Loading state while Gemini is processing
+* Error states
+* Responsive design
+* Clean dashboard-style UI
+
+### Frontend stack
+
+```text
+Next.js
+React
+TypeScript
+Tailwind CSS
+```
+
+For API calls:
+
+```text
+fetch / Axios
+```
+
+No need for a complicated frontend state-management library initially.
+
+### Important architecture
+
+**Gemini should NOT be called from the frontend.**
+
+Bad:
+
+```text
+Frontend → Gemini
+```
+
+Good:
+
+```text
+Frontend
+   ↓
+Spring Boot
+   ↓
+Gemini
+   ↓
+Tools
+   ↓
+PostgreSQL
+```
+
+That keeps the Gemini API key completely on the backend.
+
+So I'd update the `plan.txt` to include a **Next.js frontend as part of the deliverable**, with the backend remaining the core of the assignment. This will make the project much more impressive in a demo because the reviewer can actually interact with the Copilot rather than using Postman only.
+
+
