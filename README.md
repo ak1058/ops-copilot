@@ -1,6 +1,15 @@
 # OpsCopilot
 
-OpsCopilot is an AI-powered Operations Assistant designed to answer natural language queries about orders, payments, deliveries, customers, and operational timelines. It acts as a bridge between an operations employee and the backend database, ensuring that data retrieved is accurate, deterministic, and read-only.
+OpsCopilot is an AI-powered Operations Assistant designed to answer natural language queries about orders, payments, deliveries, customers, and operational timelines. It acts as a bridge between an operations employee and the backend database, ensuring that data retrieved is accurate, deterministic, and read-only. [See Features & Capabilities](#features--capabilities)
+
+## Features & Capabilities
+
+- **Natural Language Order Tracking**: Ask about any order in plain English and get up-to-date information on its status.
+- **Payment Verification**: Quickly check if an order has been paid for, what the amount was, and the payment status.
+- **Delivery Status Monitoring**: Get real-time updates on delivery schedules, dispatched orders, and expected arrival dates.
+- **Customer Information Retrieval**: Fetch customer details seamlessly without running complex database queries.
+- **Comprehensive Timelines**: View a complete end-to-end timeline of an order, from placement to delivery, including all operational events.
+- **Read-Only Safety**: The AI is restricted to read-only API endpoints, guaranteeing that your database cannot be inadvertently modified through chat interactions.
 
 ## Project Overview
 
