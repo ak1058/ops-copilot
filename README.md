@@ -78,10 +78,21 @@ Run backend unit and integration tests using:
 ./mvnw test
 ```
 
-## Security Considerations
-- The `GEMINI_API_KEY` is completely hidden on the backend and never exposed to the frontend.
-- AI is restricted to calling explicitly registered tools (`get_order`, `get_payment`, `get_delivery`, `get_customer`, `get_order_timeline`).
-- No direct SQL execution is permitted.
+## Security & AI Guardrails
+
+OpsCopilot is built with enterprise-grade safety in mind, ensuring the AI behaves predictably and securely through multiple layers of guardrails:
+
+### 1. Architectural Guardrails (Backend)
+- **Strict Read-Only Access**: The AI cannot write or run raw SQL queries against the database. It is strictly limited to calling pre-defined API endpoints (tools) like `get_order`, `get_payment`, `get_delivery`, etc.
+- **Infinite Loop Prevention (Iteration Limits)**: A `maxIterations` limit is built into the backend. If the AI gets confused or attempts to call tools in an infinite loop, the backend forcibly terminates the request, preventing unbounded API usage and latency issues.
+- **Key Security**: The `GEMINI_API_KEY` is completely hidden on the Spring Boot backend and is never exposed to the frontend.
+
+### 2. Prompt-Level Guardrails (Instructions)
+The system injects a strict system instruction before processing any query, forcing the model to adhere to the following rules:
+- **No Hallucinations**: *"Never invent order, payment, delivery, or customer information."*
+- **Mandatory Tool Usage**: *"Use tools for operational facts."*
+- **Explicit Transparency**: *"If information is unavailable, explicitly state that it is unavailable."*
+- **Evidence-Based Answers**: *"Only return a final answer when you have sufficient tool data."*
 
 ## Limitations & Future Improvements
 - **Authentication**: Currently omitted for MVP, but role-based access control would be essential for production.
